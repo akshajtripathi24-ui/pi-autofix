@@ -1,0 +1,5 @@
+# Created on the Pi while it runs
+config.json
+jobs/
+*.tmp
+__pycache__/

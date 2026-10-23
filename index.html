@@ -1,0 +1,350 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pi AutoFix</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<style>
+  :root {
+    --bg:#f5f6f8; --card:#ffffff; --text:#14171c; --muted:#68707d; --line:#e6e8ec; --hover:#f0f2f5;
+    --up:#0f8a4b; --down:#d4343a; --up-bg:#e3f5ea; --down-bg:#fbe7e8; --warn:#a15c00; --warn-bg:#fff3dc;
+    --accent:#2f6fec; --code-bg:#0d1117; --shadow:0 1px 2px rgba(16,24,40,.05);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg:#0d0f13; --card:#161a20; --text:#e7e9ed; --muted:#959cab; --line:#262b33; --hover:#1d2229;
+      --up:#3ccf7e; --down:#ff6b6f; --up-bg:#123323; --down-bg:#3a1719; --warn:#ffc266; --warn-bg:#3a2a10;
+      --accent:#5b8ff9; --shadow:none;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg:#0d0f13; --card:#161a20; --text:#e7e9ed; --muted:#959cab; --line:#262b33; --hover:#1d2229;
+    --up:#3ccf7e; --down:#ff6b6f; --up-bg:#123323; --down-bg:#3a1719; --warn:#ffc266; --warn-bg:#3a2a10;
+    --accent:#5b8ff9; --shadow:none;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  button, input, select, textarea { font:inherit; color:inherit; }
+  header { position:sticky; top:0; z-index:10; background:var(--card); border-bottom:1px solid var(--line); }
+  .bar { max-width:1000px; margin:0 auto; padding:10px 16px; display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  .logo { font-weight:700; font-size:17px; margin-right:auto; }
+  main { max-width:1000px; margin:0 auto; padding:16px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:16px; margin-bottom:16px; box-shadow:var(--shadow); }
+  .card h2 { font-size:16px; margin:0 0 12px; }
+  .muted { color:var(--muted); } .small { font-size:12px; }
+  .badge { font-size:12px; font-weight:600; padding:3px 9px; border-radius:999px; background:var(--hover); color:var(--muted); white-space:nowrap; }
+  .badge.ok { background:var(--up-bg); color:var(--up); } .badge.bad { background:var(--down-bg); color:var(--down); }
+  .badge.warn { background:var(--warn-bg); color:var(--warn); }
+  .iconBtn { border:1px solid var(--line); background:var(--card); border-radius:8px; padding:4px 10px; cursor:pointer; font-size:16px; }
+  .btn { border:1px solid var(--accent); background:var(--accent); color:#fff; border-radius:9px; padding:8px 18px; cursor:pointer; font-weight:600; }
+  .btn:disabled { opacity:.5; cursor:default; }
+  .btn.ghost { background:var(--card); color:var(--accent); }
+  .btn.danger { background:var(--card); color:var(--down); border-color:var(--down); }
+  .btn.small { padding:4px 10px; font-size:13px; }
+  .tabs { display:inline-flex; background:var(--bg); border:1px solid var(--line); border-radius:10px; padding:3px; margin-bottom:12px; }
+  .tabs button { border:0; background:none; padding:6px 14px; border-radius:8px; cursor:pointer; color:var(--muted); font-weight:600; }
+  .tabs button.on { background:var(--card); color:var(--text); box-shadow:0 1px 2px rgba(0,0,0,.12); }
+  textarea, input[type=text], input[type=number], select { width:100%; border:1px solid var(--line); background:var(--bg); border-radius:10px; padding:10px 12px; }
+  textarea { resize:vertical; min-height:90px; }
+  textarea.code { font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:13px; min-height:180px; }
+  label { display:block; font-weight:600; margin:10px 0 6px; }
+  .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:12px; }
+  .chips { display:flex; gap:6px; flex-wrap:wrap; margin-top:8px; }
+  .chip { border:1px solid var(--line); background:var(--card); border-radius:999px; padding:4px 10px; cursor:pointer; font-size:12px; color:var(--muted); }
+  .chip:hover { color:var(--accent); border-color:var(--accent); }
+  .msg { font-size:13px; } .msg.err { color:var(--down); } .msg.ok { color:var(--up); }
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  @media (max-width:640px) { .grid2 { grid-template-columns:1fr; } }
+
+  /* Timeline */
+  .jobHead { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; flex-wrap:wrap; }
+  .jobHead h2 { margin:0; }
+  .status { font-weight:700; padding:3px 10px; border-radius:8px; font-size:13px; white-space:nowrap; }
+  .status.passed { background:var(--up-bg); color:var(--up); } .status.failed, .status.error { background:var(--down-bg); color:var(--down); }
+  .status.running, .status.queued { background:var(--hover); color:var(--accent); } .status.cancelled { background:var(--hover); color:var(--muted); }
+  .timeline { margin:14px 0 0; padding:0; list-style:none; }
+  .step { border-left:3px solid var(--line); padding:4px 0 12px 16px; position:relative; }
+  .step::before { content:""; position:absolute; left:-8px; top:8px; width:13px; height:13px; border-radius:50%; background:var(--line); }
+  .step.pass::before { background:var(--up); } .step.fail::before { background:var(--down); }
+  .step.live::before { background:var(--accent); animation:pulse 1.2s infinite; }
+  @keyframes pulse { 50% { opacity:.3; } }
+  .step b { display:block; }
+  details { margin-top:6px; } summary { cursor:pointer; color:var(--accent); font-size:13px; }
+  pre { margin:8px 0 0; padding:12px; border-radius:10px; background:var(--code-bg); color:#e6edf3; overflow:auto; font-size:12.5px; line-height:1.45; max-height:480px; }
+  pre code.hljs { padding:0; background:none; }
+  .note { margin-top:6px; padding:8px 10px; border-radius:8px; background:var(--warn-bg); color:var(--warn); font-size:13px; }
+  .spinner { display:inline-block; width:12px; height:12px; border:2px solid var(--line); border-top-color:var(--accent); border-radius:50%; animation:spin .8s linear infinite; vertical-align:-2px; margin-right:6px; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+
+  /* Result */
+  .fileTabs { display:flex; gap:6px; flex-wrap:wrap; margin:14px 0 0; align-items:center; }
+  .fileTabs button.tab { border:1px solid var(--line); background:var(--card); border-radius:8px; padding:5px 12px; cursor:pointer; font-family:ui-monospace, Menlo, Consolas, monospace; font-size:13px; }
+  .fileTabs button.tab.on { border-color:var(--accent); color:var(--accent); }
+  .fileTabs .spacer { flex:1; }
+  .explain { margin-top:12px; white-space:pre-wrap; }
+
+  /* History */
+  .hist { display:flex; justify-content:space-between; gap:10px; padding:9px 4px; border-bottom:1px solid var(--line); cursor:pointer; }
+  .hist:last-child { border-bottom:0; } .hist:hover { background:var(--hover); }
+  .hist .t { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; }
+  .hidden { display:none; }
+  footer { max-width:1000px; margin:0 auto; padding:0 16px 32px; color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<header>
+  <div class="bar">
+    <span class="logo">🛠️ Pi AutoFix</span>
+    <span class="badge" id="aiBadge">● AI …</span>
+    <span class="badge" id="boxBadge">🧪 Sandbox …</span>
+    <button class="iconBtn" id="settingsBtn" title="Settings">⚙️</button>
+    <button class="iconBtn" id="themeBtn" title="Light/dark">◐</button>
+  </div>
+</header>
+
+<main>
+  <div class="card hidden" id="settings">
+    <h2>⚙️ Settings</h2>
+    <div class="grid2">
+      <div>
+        <label for="sUrl">Laptop's Ollama address</label>
+        <input type="text" id="sUrl" placeholder="192.168.1.150:11434">
+        <div class="small muted">Your laptop's IPv4 address from <code>ipconfig</code>, then <code>:11434</code></div>
+      </div>
+      <div>
+        <label for="sModel">AI model</label>
+        <select id="sModel"></select>
+        <div class="small muted"><b>3b</b> = fast (about 30–60 s per answer). <b>7b</b> = smarter but about 2× slower.</div>
+      </div>
+      <div>
+        <label for="sAttempts">Max attempts</label>
+        <input type="number" id="sAttempts" min="1" max="10">
+        <div class="small muted">How many times it may try to fix the code before giving up (1–10)</div>
+      </div>
+    </div>
+    <div class="row"><button class="btn" id="sSave">Save</button><span class="msg" id="sMsg"></span></div>
+  </div>
+
+  <div class="card" id="startCard">
+    <div class="tabs" id="modeTabs">
+      <button data-mode="build" class="on">✨ Build something</button>
+      <button data-mode="fix">🐞 Fix my code</button>
+    </div>
+    <div id="buildForm">
+      <label for="task">What should the program do?</label>
+      <textarea id="task" placeholder="Example: a function that checks if a password is strong: at least 8 characters, with a number, an uppercase letter and a symbol"></textarea>
+      <div class="chips" id="examples">
+        <button class="chip">Convert Roman numerals to numbers and back</button>
+        <button class="chip">A to-do list class with add, complete, remove and list</button>
+        <button class="chip">Check if a password is strong and say why not</button>
+        <button class="chip">Find the most common word in a sentence</button>
+        <button class="chip">A tip calculator that splits the bill between people</button>
+      </div>
+    </div>
+    <div id="fixForm" class="hidden">
+      <label for="code">Paste your Python code</label>
+      <textarea id="code" class="code" spellcheck="false" placeholder="def average(numbers):&#10;    return sum(numbers) / len(numbers) + 1"></textarea>
+      <label for="goal">What should it do? <span class="muted small">(optional, but helps a lot)</span></label>
+      <textarea id="goal" style="min-height:60px" placeholder="Example: return the average of a list of numbers, and 0 for an empty list"></textarea>
+    </div>
+    <div class="row">
+      <button class="btn" id="startBtn">▶ Start</button>
+      <span class="msg" id="startMsg"></span>
+    </div>
+    <p class="small muted" style="margin:10px 0 0">The AI writes the code <b>and</b> tests for it. Your Pi runs the tests in a locked-down sandbox. If anything fails, the error goes back to the AI to fix, again and again, until every test passes.</p>
+  </div>
+
+  <div class="card hidden" id="jobCard"></div>
+
+  <div class="card">
+    <h2>🕘 History</h2>
+    <div id="history"><div class="muted small">Nothing yet.</div></div>
+  </div>
+</main>
+<footer>Pi AutoFix · the AI runs on your own laptop with Ollama, free and private · always read code before you use it</footer>
+
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const api = async (path, body) => {
+  const r = await fetch(path, body ? {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)} : undefined);
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.error || ("Error " + r.status));
+  return data;
+};
+const store = {
+  get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
+};
+const fmtSecs = s => s >= 60 ? `${Math.floor(s / 60)}m ${String(Math.round(s % 60)).padStart(2, "0")}s` : `${Math.round(s)}s`;
+const highlight = (code) => {
+  if (window.hljs) { try { return hljs.highlight(code, {language: "python"}).value; } catch {} }
+  return esc(code);
+};
+
+// ---------- theme ----------
+const theme = store.get("theme", null);
+if (theme) document.documentElement.dataset.theme = theme;
+$("#themeBtn").onclick = () => {
+  const cur = document.documentElement.dataset.theme || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+  document.documentElement.dataset.theme = cur === "dark" ? "light" : "dark";
+  store.set("theme", document.documentElement.dataset.theme);
+};
+
+// ---------- status + settings ----------
+let status = null;
+async function loadStatus() {
+  try { status = await api("/api/status"); } catch { $("#aiBadge").textContent = "● Pi offline"; $("#aiBadge").className = "badge bad"; return; }
+  const ai = status.ai, b = $("#aiBadge");
+  if (ai.ok && !ai.error) { b.textContent = "● AI ready · " + status.config.model; b.className = "badge ok"; b.title = ""; }
+  else if (ai.ok) { b.textContent = "● Model missing"; b.className = "badge warn"; b.title = ai.error; }
+  else { b.textContent = "● AI offline"; b.className = "badge bad"; b.title = ai.error || ""; }
+  const sb = status.sandbox, x = $("#boxBadge");
+  if (sb.user && sb.network_blocked) { x.textContent = "🧪 Sandbox: locked down"; x.className = "badge ok"; x.title = "Tests run as a separate user, with no internet, a time limit and a memory limit."; }
+  else { x.textContent = "🧪 Sandbox: basic"; x.className = "badge warn";
+    x.title = (sb.user ? "" : "Tests run as your user. Run setup-sandbox.sh on the Pi to lock it down. ") + (sb.network_blocked ? "" : "The internet isn't blocked for tests."); }
+  if (!status.config.ollama_url) openSettings("Start here: enter your laptop's Ollama address.");
+  if (status.busy && !currentId) showJob(status.busy);
+  fillSettings();
+}
+function fillSettings() {
+  if (!status || document.activeElement?.closest("#settings")) return;
+  $("#sUrl").value = status.config.ollama_url.replace(/^https?:\/\//, "");
+  $("#sAttempts").value = status.config.max_attempts;
+  const models = [...new Set([...(status.ai.models || []), status.config.model])];
+  $("#sModel").innerHTML = models.map(m => `<option ${m === status.config.model ? "selected" : ""}>${esc(m)}</option>`).join("");
+}
+function openSettings(msg) {
+  $("#settings").classList.remove("hidden");
+  if (msg) { $("#sMsg").className = "msg"; $("#sMsg").textContent = msg; }
+}
+$("#settingsBtn").onclick = () => $("#settings").classList.toggle("hidden");
+$("#sSave").onclick = async () => {
+  const m = $("#sMsg");
+  try {
+    await api("/api/config", {ollama_url: $("#sUrl").value, model: $("#sModel").value, max_attempts: $("#sAttempts").value});
+    m.className = "msg"; m.textContent = "Saved. Checking the connection…";
+    await loadStatus();
+    if (status.ai.ok && !status.ai.error) { m.className = "msg ok"; m.textContent = "✓ Connected to the AI on your laptop."; }
+    else { m.className = "msg err"; m.textContent = status.ai.error || "Can't reach the AI."; }
+  } catch (e) { m.className = "msg err"; m.textContent = e.message; }
+};
+
+// ---------- start a job ----------
+let mode = "build";
+$("#modeTabs").onclick = e => {
+  const b = e.target.closest("[data-mode]"); if (!b) return;
+  mode = b.dataset.mode;
+  document.querySelectorAll("#modeTabs button").forEach(x => x.classList.toggle("on", x === b));
+  $("#buildForm").classList.toggle("hidden", mode !== "build");
+  $("#fixForm").classList.toggle("hidden", mode !== "fix");
+};
+$("#examples").onclick = e => { const c = e.target.closest(".chip"); if (c) { $("#task").value = c.textContent; $("#task").focus(); } };
+$("#startBtn").onclick = async () => {
+  const msg = $("#startMsg");
+  msg.className = "msg"; msg.textContent = "";
+  const body = mode === "build" ? {mode, task: $("#task").value} : {mode, code: $("#code").value, task: $("#goal").value};
+  try {
+    const r = await api("/api/jobs", body);
+    showJob(r.id);
+    loadHistory();
+  } catch (e) { msg.className = "msg err"; msg.textContent = e.message; }
+};
+
+// ---------- show a job ----------
+let currentId = null, pollTimer = null, job = null, fileTab = "solution.py";
+function showJob(id) {
+  currentId = id; fileTab = "solution.py";
+  clearTimeout(pollTimer);
+  $("#jobCard").classList.remove("hidden");
+  $("#jobCard").innerHTML = '<div class="muted"><span class="spinner"></span>Loading…</div>';
+  poll();
+}
+async function poll() {
+  if (!currentId) return;
+  try { job = await api("/api/jobs/" + currentId); } catch { pollTimer = setTimeout(poll, 3000); return; }
+  renderJob();
+  const live = job.status === "running" || job.status === "queued";
+  $("#startBtn").disabled = live;
+  if (live) pollTimer = setTimeout(poll, 1500);
+  else loadHistory();
+}
+
+const STATUS_TEXT = {queued: "Waiting…", running: "Working…", passed: "✅ All tests pass", failed: "❌ Couldn't fix it", error: "⚠️ Error", cancelled: "Stopped"};
+function attemptHTML(a, live) {
+  const lines = [];
+  const elapsed = live && a.started ? fmtSecs(job.server_now - a.started) : "";
+  if (a.phase === "ai") {
+    lines.push(`<div class="muted"><span class="spinner"></span>${a.n === 1 ? "AI is writing the code and tests" : "AI is fixing the code"}… ${elapsed}</div>`);
+  } else if (a.ai_seconds !== undefined) {
+    lines.push(`<div class="muted small">AI answered in ${fmtSecs(a.ai_seconds)}${a.model ? " · " + esc(a.model) : ""}${a.test_count ? " · " + a.test_count + " tests" : ""}</div>`);
+  }
+  if (a.phase === "testing") lines.push(`<div class="muted"><span class="spinner"></span>Running the tests in the sandbox…</div>`);
+  if (a.phase === "done" && a.ran !== undefined) {
+    lines.push(a.passed ? `<div style="color:var(--up)">✓ All ${a.ran} tests passed</div>`
+      : `<div style="color:var(--down)">✗ ${a.failures + a.errors || "Some"} of ${a.ran} tests failed${a.ran === 0 ? " (or the code didn't run)" : ""}</div>`);
+  }
+  if (a.note) lines.push(`<div class="note">${esc(a.note)}</div>`);
+  if (a.tests_changed) lines.push(`<div class="note">The AI changed the tests in this attempt. Check they still test the right thing.</div>`);
+  if (a.test_output) lines.push(`<details><summary>Test output</summary><pre>${esc(a.test_output)}</pre></details>`);
+  if (a.solution && !a.passed && a.phase === "done") lines.push(`<details><summary>Code from this attempt</summary><pre><code>${highlight(a.solution)}</code></pre></details>`);
+  const cls = a.phase !== "done" ? "live" : a.passed ? "pass" : "fail";
+  return `<li class="step ${cls}"><b>Attempt ${a.n}</b>${lines.join("")}</li>`;
+}
+function renderJob() {
+  const j = job, live = j.status === "running" || j.status === "queued";
+  const openDetails = [...document.querySelectorAll("#jobCard details")].map(d => d.open);
+  const best = [...j.attempts].reverse().find(a => a.passed) || [...j.attempts].reverse().find(a => a.solution);
+  const files = best ? {"solution.py": best.solution, "test_solution.py": best.tests} : null;
+  $("#jobCard").innerHTML = `
+    <div class="jobHead">
+      <div><h2>${j.mode === "fix" ? "🐞 " : "✨ "}${esc(j.title)}</h2><div class="muted small">${esc(j.created)}</div></div>
+      <div class="row" style="margin:0"><span class="status ${j.status}">${STATUS_TEXT[j.status] || j.status}</span>
+        ${live ? '<button class="btn danger small" id="stopBtn">Stop</button>' : ""}</div>
+    </div>
+    ${j.message ? `<p class="${j.status === "passed" ? "" : "msg err"}" style="margin:10px 0 0">${esc(j.message)}</p>` : ""}
+    ${j.tests_changed && j.status === "passed" ? '<div class="note">The AI changed the tests along the way. Read them to make sure they still check the right thing.</div>' : ""}
+    <ol class="timeline">${j.attempts.map((a, i) => attemptHTML(a, live && i === j.attempts.length - 1)).join("")}
+      ${j.status === "queued" ? '<li class="step live"><b>Starting…</b></li>' : ""}</ol>
+    ${files && !live ? `
+      <h2 style="margin-top:16px">${j.status === "passed" ? "✅ Your tested code" : "Best attempt (still has failing tests)"}</h2>
+      <div class="fileTabs">
+        ${Object.keys(files).map(f => `<button class="tab ${f === fileTab ? "on" : ""}" data-file="${f}">${f}</button>`).join("")}
+        <span class="spacer"></span>
+        <button class="btn ghost small" id="copyBtn">Copy</button>
+        <button class="btn ghost small" id="dlBtn">Download</button>
+      </div>
+      <pre><code>${highlight(files[fileTab] || "")}</code></pre>
+      ${best.explanation ? `<div class="explain">${esc(best.explanation)}</div>` : ""}
+      <p class="small muted">Run it on your computer: save both files in one folder, then run <code>python test_solution.py</code> to see the tests pass.</p>` : ""}`;
+  document.querySelectorAll("#jobCard details").forEach((d, i) => { if (openDetails[i]) d.open = true; });
+  if ($("#stopBtn")) $("#stopBtn").onclick = async () => { const r = await api(`/api/jobs/${j.id}/cancel`, {}); $("#stopBtn").textContent = "Stopping…"; $("#stopBtn").title = r.note; };
+  document.querySelectorAll("[data-file]").forEach(b => b.onclick = () => { fileTab = b.dataset.file; renderJob(); });
+  if ($("#copyBtn")) $("#copyBtn").onclick = async () => {
+    try { await navigator.clipboard.writeText(files[fileTab]); $("#copyBtn").textContent = "Copied ✓"; } catch { $("#copyBtn").textContent = "Select and copy"; }
+  };
+  if ($("#dlBtn")) $("#dlBtn").onclick = () => {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([files[fileTab]], {type: "text/x-python"}));
+    a.download = fileTab; a.click(); URL.revokeObjectURL(a.href);
+  };
+}
+
+// ---------- history ----------
+async function loadHistory() {
+  let list;
+  try { list = await api("/api/jobs"); } catch { return; }
+  $("#history").innerHTML = list.map(j => `
+    <div class="hist" data-id="${esc(j.id)}"><span class="t">${j.mode === "fix" ? "🐞" : "✨"} ${esc(j.title)}</span>
+      <span class="small muted" style="white-space:nowrap">${STATUS_TEXT[j.status] || esc(j.status)} · ${j.attempts} ${j.attempts === 1 ? "try" : "tries"}</span></div>`).join("")
+    || '<div class="muted small">Nothing yet.</div>';
+}
+$("#history").onclick = e => { const h = e.target.closest("[data-id]"); if (h) { showJob(h.dataset.id); $("#jobCard").scrollIntoView({behavior: "smooth"}); } };
+
+loadStatus(); loadHistory();
+setInterval(loadStatus, 15000);
+</script>
+</body>
+</html>
