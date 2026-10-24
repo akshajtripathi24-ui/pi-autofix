@@ -17,7 +17,9 @@ PORT = 8001
 HERE = os.path.dirname(os.path.abspath(__file__))
 CONFIG_FILE = os.path.join(HERE, "config.json")
 JOBS_DIR = os.path.join(HERE, "jobs")
-DEFAULT_CONFIG = {"ollama_url": "", "model": "qwen2.5-coder:3b", "max_attempts": 5, "min_strength": 70}
+LESSONS_FILE = os.path.join(HERE, "lessons.json")
+DEFAULT_CONFIG = {"ollama_url": "", "model": "qwen2.5-coder:3b", "max_attempts": 5, "min_strength": 70,
+                  "use_lessons": True}
 
 SANDBOX_USER = "autofix"      # created by setup-sandbox.sh
 SANDBOX_PYTHON = "/usr/bin/python3"
@@ -140,6 +142,75 @@ def examples_text(job):
         return ""
     return ("\n\nThe user gave these examples. They are the TRUTH: the code must behave exactly like this:\n"
             + job["examples"].strip())
+
+
+# ---------- 🧠 lessons: learn from the bugs the tests missed ----------
+
+# Each kind of planted bug that slips past the tests teaches one fixed lesson.
+LESSONS = {
+    "and_or": ("🔀", "When a condition uses `and` / `or`, test each part on its own. For range checks like "
+               "`index < 0 or index >= len(items)`, test a negative index (-1) AND a too-big index separately, "
+               "and expect an error for both."),
+    "boundary": ("📏", "Test the exact boundary values. For a limit like `x < 10`, test 9, 10 and 11. "
+                 "For list indexes, test 0, the last index, and one past the end."),
+    "equality": ("🟰", "For every `==`, `!=`, `in` or `is` check, test one value that matches and one that doesn't."),
+    "math": ("➗", "Check exact calculated numbers with assertEqual, not just that a result exists or is positive."),
+    "counters": ("🔢", "When something adds up or counts down (totals, counters, balances), check the exact value "
+                 "after several steps."),
+    "returns": ("↩️", "Check the return value of every function and method with assertEqual, not only what it changes."),
+    "branches": ("🔁", "Test both the yes and the no path of every `if`: one input where it's true and one where it's false."),
+    "numbers": ("🔟", "Check exact results that depend on numbers in the code, like starting values, limits and step sizes."),
+    "flags": ("✅", "Check True/False results and flags exactly with assertTrue / assertFalse."),
+}
+MAX_LESSONS_IN_PROMPT = 5
+lessons = {}                  # kind -> {"count": jobs where tests missed it, "used": jobs it was given to, "last": date}
+lessons_lock = threading.Lock()
+
+
+def load_lessons():
+    lessons.update({k: v for k, v in load_json(LESSONS_FILE, {}).items() if k in LESSONS})
+
+
+def save_lessons():
+    with lessons_lock:
+        save_json(LESSONS_FILE, lessons)
+
+
+def lessons_to_use():
+    """The most common lessons so far, most useful first."""
+    if not config.get("use_lessons", True):
+        return []
+    ranked = sorted((k for k, v in lessons.items() if v.get("count", 0) > 0),
+                    key=lambda k: -lessons[k]["count"])
+    return ranked[:MAX_LESSONS_IN_PROMPT]
+
+
+def system_prompt(kinds):
+    if not kinds:
+        return SYSTEM_PROMPT
+    tips = "\n".join(f"- {LESSONS[k][1]}" for k in kinds)
+    return (SYSTEM_PROMPT + "\n\nLessons from earlier tasks, where tests missed real bugs. "
+            "Follow them when writing test_solution.py:\n" + tips)
+
+
+def learn_from(job):
+    """Remember which kinds of planted bugs the tests missed in this job."""
+    kinds = sorted({b["kind"] for a in job["attempts"] if a.get("strength")
+                    for b in a["strength"]["survived"] if b.get("kind") in LESSONS})
+    with lessons_lock:
+        for k in kinds:
+            entry = lessons.setdefault(k, {"count": 0, "used": 0})
+            entry["count"] += 1
+            entry["last"] = now()
+        tested = any(a.get("strength") for a in job["attempts"])
+        for k in job.get("lessons_used", []):
+            entry = lessons.setdefault(k, {"count": 0, "used": 0})
+            entry["used"] = entry.get("used", 0) + 1
+            if tested and k not in kinds:          # given this lesson, the tests caught that kind of bug
+                entry["helped"] = entry.get("helped", 0) + 1
+    if kinds or job.get("lessons_used"):
+        save_lessons()
+    return kinds
 
 
 def first_prompt(job):
@@ -359,10 +430,11 @@ class Mutator(ast.NodeTransformer):
         self.count += 1
         return hit
 
-    def _record(self, node, new):
+    def _record(self, node, new, kind):
         new = ast.copy_location(new, node)
         before = ast.get_source_segment(self.source, node) or ast.unparse(node)
-        self.change = {"line": node.lineno, "before": before.strip()[:120], "after": ast.unparse(new)[:120]}
+        self.change = {"line": node.lineno, "before": before.strip()[:120], "after": ast.unparse(new)[:120],
+                       "kind": kind}
         return new
 
     def visit_If(self, node):
@@ -371,7 +443,7 @@ class Mutator(ast.NodeTransformer):
             return node                           # don't plant bugs in the demo
         self.generic_visit(node)
         if self._hit():                           # flip the condition: if x: -> if not x:
-            new_test = self._record(node.test, ast.UnaryOp(op=ast.Not(), operand=node.test))
+            new_test = self._record(node.test, ast.UnaryOp(op=ast.Not(), operand=node.test), "branches")
             return ast.If(test=new_test, body=node.body, orelse=node.orelse)
         return node
 
@@ -382,14 +454,14 @@ class Mutator(ast.NodeTransformer):
         self.generic_visit(node)
         new = SWAP.get(type(node.op))
         if new and self._hit():
-            return self._record(node, ast.BinOp(left=node.left, op=new(), right=node.right))
+            return self._record(node, ast.BinOp(left=node.left, op=new(), right=node.right), "math")
         return node
 
     def visit_AugAssign(self, node):
         self.generic_visit(node)
         new = SWAP.get(type(node.op))
         if new and self._hit():
-            return self._record(node, ast.AugAssign(target=node.target, op=new(), value=node.value))
+            return self._record(node, ast.AugAssign(target=node.target, op=new(), value=node.value), "counters")
         return node
 
     def visit_Compare(self, node):
@@ -399,36 +471,37 @@ class Mutator(ast.NodeTransformer):
             if new and self._hit():
                 ops = list(node.ops)
                 ops[i] = new()
-                return self._record(node, ast.Compare(left=node.left, ops=ops, comparators=node.comparators))
+                kind = "boundary" if isinstance(op, (ast.Lt, ast.LtE, ast.Gt, ast.GtE)) else "equality"
+                return self._record(node, ast.Compare(left=node.left, ops=ops, comparators=node.comparators), kind)
         return node
 
     def visit_BoolOp(self, node):
         self.generic_visit(node)
         new = SWAP.get(type(node.op))
         if new and self._hit():
-            return self._record(node, ast.BoolOp(op=new(), values=node.values))
+            return self._record(node, ast.BoolOp(op=new(), values=node.values), "and_or")
         return node
 
     def visit_UnaryOp(self, node):
         self.generic_visit(node)
         if isinstance(node.op, ast.Not) and self._hit():
-            return self._record(node, node.operand)
+            return self._record(node, node.operand, "branches")
         return node
 
     def visit_Constant(self, node):
         if isinstance(node.value, bool):
             if self._hit():
-                return self._record(node, ast.Constant(value=not node.value))
+                return self._record(node, ast.Constant(value=not node.value), "flags")
         elif isinstance(node.value, (int, float)):
             if self._hit():
-                return self._record(node, ast.Constant(value=node.value + 1))
+                return self._record(node, ast.Constant(value=node.value + 1), "numbers")
         return node
 
     def visit_Return(self, node):
         self.generic_visit(node)
         if node.value is not None and not (isinstance(node.value, ast.Constant) and node.value.value is None):
             if self._hit():
-                return self._record(node, ast.Return(value=ast.Constant(value=None)))
+                return self._record(node, ast.Return(value=ast.Constant(value=None)), "returns")
         return node
 
 
@@ -481,6 +554,8 @@ def run_job(job):
         prev, todo, survived = None, "write", []       # todo: write -> fix (tests failed) / strengthen (tests weak)
         best_score = -1                                 # stop asking for stronger tests once they stop improving
         max_attempts, min_strength = int(config["max_attempts"]), int(config["min_strength"])
+        job["lessons_used"] = lessons_to_use()
+        prompt_system = system_prompt(job["lessons_used"])
         try:
             for n in range(1, max_attempts + 1):
                 if job.get("cancel"):
@@ -493,7 +568,7 @@ def run_job(job):
                 prompt = {"write": lambda: first_prompt(job), "fix": lambda: fix_prompt(job, prev),
                           "strengthen": lambda: strengthen_prompt(job, prev, survived)}[todo]()
                 t0 = time.time()
-                reply = ask_ai(SYSTEM_PROMPT, prompt)
+                reply = ask_ai(prompt_system, prompt)
                 attempt["ai_seconds"] = round(time.time() - t0)
                 solution, tests, explanation = parse_reply(reply)
                 attempt["explanation"] = explanation
@@ -600,6 +675,10 @@ def run_job(job):
             if job["attempts"] and job["attempts"][-1].get("phase") != "done":
                 job["attempts"][-1].update(phase="done", passed=False, note=str(e))
         job["finished"] = now()
+        try:
+            job["learned"] = learn_from(job)
+        except Exception as e:  # never let memory problems break a job
+            print("Couldn't update lessons:", e)
         if any(a.get("tests_changed") for a in job["attempts"]):
             job["tests_changed"] = True
         save_job(job)
@@ -676,6 +755,35 @@ def api_start(body):
     return 200, {"id": job["id"]}
 
 
+def api_lessons():
+    with lessons_lock:
+        items = [{"kind": k, "icon": LESSONS[k][0], "text": LESSONS[k][1], **v} for k, v in lessons.items()
+                 if k in LESSONS and v.get("count", 0) > 0]
+    items.sort(key=lambda x: -x["count"])
+    in_use = lessons_to_use()
+    for x in items:
+        x["in_use"] = x["kind"] in in_use
+    return {"enabled": config.get("use_lessons", True), "lessons": items, "max_in_prompt": MAX_LESSONS_IN_PROMPT}
+
+
+def api_lessons_post(body):
+    action = body.get("action")
+    if action == "forget" and body.get("kind") in lessons:
+        with lessons_lock:
+            lessons.pop(body["kind"], None)
+        save_lessons()
+    elif action == "forget_all":
+        with lessons_lock:
+            lessons.clear()
+        save_lessons()
+    elif action == "enable":
+        config["use_lessons"] = bool(body.get("enabled"))
+        save_json(CONFIG_FILE, config)
+    else:
+        return 400, {"error": "Unknown action"}
+    return 200, api_lessons()
+
+
 def api_config(body):
     url = str(body.get("ollama_url", config["ollama_url"])).strip()
     if url and not re.fullmatch(r"(https?://)?[\w.-]+(:\d{1,5})?/?", url):
@@ -711,6 +819,8 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send(f.read(), "text/html; charset=utf-8")
             if path == "/api/status":
                 return self.send_json(api_status())
+            if path == "/api/lessons":
+                return self.send_json(api_lessons())
             if path == "/api/jobs":
                 with jobs_lock:
                     items = sorted(jobs.values(), key=lambda j: j["created"], reverse=True)
@@ -744,6 +854,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json(*reversed(api_start(body)))
             if path == "/api/config":
                 return self.send_json(*reversed(api_config(body)))
+            if path == "/api/lessons":
+                return self.send_json(*reversed(api_lessons_post(body)))
             m = re.fullmatch(r"/api/jobs/([\w-]+)/cancel", path)
             if m and m.group(1) in jobs:
                 jobs[m.group(1)]["cancel"] = True
@@ -769,6 +881,7 @@ class Handler(BaseHTTPRequestHandler):
 if __name__ == "__main__":
     load_config()
     load_jobs()
+    load_lessons()
     check_sandbox()
     print(f"Pi AutoFix running! Open http://<your-pi-ip>:{PORT}  (Ctrl+C to stop)")
     ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()

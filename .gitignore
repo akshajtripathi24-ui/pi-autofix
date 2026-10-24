@@ -3,3 +3,4 @@ config.json
 jobs/
 *.tmp
 __pycache__/
+lessons.json

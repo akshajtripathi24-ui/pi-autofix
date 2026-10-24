@@ -29,6 +29,7 @@ It's **100% free and private**. The AI runs on your own laptop with [Ollama](htt
 - **🐞 Fix my code:** paste buggy code (and what it should do), and get it fixed and tested.
 - **📝 Your examples become locked tests:** write a few examples in plain words (e.g. `add "Milk", complete task 0 → Milk shows as done`). The AI must pass them and can't change them, so **you** decide what "correct" means.
 - **🧬 Test strength score:** AutoFix plants small bugs (like `<` → `<=`, `+` → `-`, `if x:` → `if not x:`) one at a time and checks the tests catch them. "Caught 12 of 15 = 80%". Below your goal, it asks the AI for stronger tests.
+- **🧠 Lessons memory:** every kind of bug the tests miss becomes a lesson (e.g. "test a negative index AND a too-big index separately"). The most common lessons are given to the AI every time, so it writes better tests from the start. The more you use it, the better it gets.
 - **▶ Runs the demo:** the program's `if __name__ == "__main__":` demo runs too, and must not crash.
 - **Clear rules for the AI:** functions return results instead of printing, bad input raises an error instead of printing a message, numbering is consistent, and each method does exactly what its name says.
 - **Shows its work:** every attempt, the AI's time, which tests failed, the full error output and what the demo printed.
@@ -230,6 +231,36 @@ Professional developers use this technique too; it's called **mutation testing**
 
 > **Passing tests ≠ perfect.** Tests only check what they test. Add examples, look at the test strength, and always read the code and the tests before you rely on them.
 
+### 🧠 Lessons: AutoFix learns from its mistakes
+
+Training an AI model (fine-tuning) needs a powerful graphics card and thousands of examples. Instead, AutoFix **remembers what went wrong** and reminds the AI. Many real AI tools work this way.
+
+Every planted bug the tests miss has a **kind**, and each kind teaches one lesson:
+
+| The tests missed… | Lesson the AI gets next time |
+|---|---|
+| `or` → `and` in a check | 🔀 Test each part of an `and`/`or` on its own: e.g. a negative index **and** a too-big index |
+| `<` → `<=` | 📏 Test exact boundary values: 9, 10 and 11 for `x < 10`; 0, the last index and one past the end |
+| `==` → `!=`, `in` → `not in` | 🟰 Test a value that matches and one that doesn't |
+| `+` → `-`, `*` → `/` | ➗ Check exact calculated numbers |
+| `+=` → `-=` | 🔢 Check exact totals after several steps |
+| `return x` → `return None` | ↩️ Check every return value |
+| `if x:` → `if not x:` | 🔁 Test both the yes and no path of every `if` |
+| a number changed by 1 | 🔟 Check results that depend on limits, starting values and step sizes |
+| `True` → `False` | ✅ Check True/False results exactly |
+
+The **5 most common** lessons go into the AI's instructions for every new job. The **🧠 Lessons** card shows each lesson:
+- **Tests missed this in N jobs:** how often that kind of gap was found
+- **Given to the AI in N jobs:** how often it was used
+- **Helped N times:** jobs where the AI had the lesson and its tests then caught that kind of bug
+- **in use:** it's currently given to the AI
+
+Click ✕ to forget a lesson, **Forget all** to start fresh, or untick **Give lessons to the AI** to compare results without them.
+
+The lessons are fixed sentences written into AutoFix, not made up by the AI, so a confused AI can't teach itself something wrong. They're saved in `lessons.json` on the Pi.
+
+**Good to know:** some planted bugs make no real difference to the code (see "What it can't do" above), so a lesson can keep appearing even when the tests are fine. That's why it's a reminder for the AI, not a rule.
+
 ### Settings (⚙️)
 
 | Setting | Default | Meaning |
@@ -294,6 +325,7 @@ If the badge says **🧪 Sandbox: basic**, run `bash setup-sandbox.sh` and resta
 
 - [x] **Stage 1:** Python, build and fix modes, test-and-fix loop, sandbox
 - [x] **Stage 1.5:** your examples as locked tests, test strength (mutation testing), demo check, clearer rules for the AI
+- [x] **🧠 Lessons memory:** learns from the bugs its tests missed and reminds the AI next time
 - [ ] **Stage 2:** more languages: JavaScript, C, C++, Java, Bash
 - [ ] **Stage 3:** hardware mode: ESP32/Arduino code that compiles, wiring table, parts list, wiring safety checks
 - [ ] **Stage 4:** 3D-printable cases designed in OpenSCAD, rendered and checked, with a preview
