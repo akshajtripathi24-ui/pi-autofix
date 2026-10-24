@@ -123,6 +123,11 @@
         <input type="number" id="sAttempts" min="1" max="10">
         <div class="small muted">How many times it may try to fix the code before giving up (1–10)</div>
       </div>
+      <div>
+        <label for="sStrength">Test strength goal (%)</label>
+        <input type="number" id="sStrength" min="0" max="100" step="5">
+        <div class="small muted">AutoFix plants small bugs in the code to check the tests catch them. Below this score, it asks the AI for stronger tests. 0 = off.</div>
+      </div>
     </div>
     <div class="row"><button class="btn" id="sSave">Save</button><span class="msg" id="sMsg"></span></div>
   </div>
@@ -149,6 +154,12 @@
       <label for="goal">What should it do? <span class="muted small">(optional, but helps a lot)</span></label>
       <textarea id="goal" style="min-height:60px" placeholder="Example: return the average of a list of numbers, and 0 for an empty list"></textarea>
     </div>
+    <label for="userExamples">📝 Your examples <span class="muted small">(optional, but the best way to make sure it's right)</span></label>
+    <textarea id="userExamples" style="min-height:80px" placeholder="One per line, in your own words or code. For example:
+add &quot;Milk&quot;, then complete task 0 → list shows Milk as done (not deleted)
+add &quot;   &quot; (only spaces) → error
+roman_to_int(&quot;XIV&quot;) → 14"></textarea>
+    <div class="small muted">AutoFix turns these into <b>locked tests</b>. The AI must pass them and can't change them, so <b>you</b> decide what "correct" means.</div>
     <div class="row">
       <button class="btn" id="startBtn">▶ Start</button>
       <span class="msg" id="startMsg"></span>
@@ -213,6 +224,7 @@ function fillSettings() {
   if (!status || document.activeElement?.closest("#settings")) return;
   $("#sUrl").value = status.config.ollama_url.replace(/^https?:\/\//, "");
   $("#sAttempts").value = status.config.max_attempts;
+  $("#sStrength").value = status.config.min_strength;
   const models = [...new Set([...(status.ai.models || []), status.config.model])];
   $("#sModel").innerHTML = models.map(m => `<option ${m === status.config.model ? "selected" : ""}>${esc(m)}</option>`).join("");
 }
@@ -224,7 +236,7 @@ $("#settingsBtn").onclick = () => $("#settings").classList.toggle("hidden");
 $("#sSave").onclick = async () => {
   const m = $("#sMsg");
   try {
-    await api("/api/config", {ollama_url: $("#sUrl").value, model: $("#sModel").value, max_attempts: $("#sAttempts").value});
+    await api("/api/config", {ollama_url: $("#sUrl").value, model: $("#sModel").value, max_attempts: $("#sAttempts").value, min_strength: $("#sStrength").value});
     m.className = "msg"; m.textContent = "Saved. Checking the connection…";
     await loadStatus();
     if (status.ai.ok && !status.ai.error) { m.className = "msg ok"; m.textContent = "✓ Connected to the AI on your laptop."; }
@@ -246,6 +258,7 @@ $("#startBtn").onclick = async () => {
   const msg = $("#startMsg");
   msg.className = "msg"; msg.textContent = "";
   const body = mode === "build" ? {mode, task: $("#task").value} : {mode, code: $("#code").value, task: $("#goal").value};
+  body.examples = $("#userExamples").value;
   try {
     const r = await api("/api/jobs", body);
     showJob(r.id);
@@ -273,31 +286,55 @@ async function poll() {
 }
 
 const STATUS_TEXT = {queued: "Waiting…", running: "Working…", passed: "✅ All tests pass", failed: "❌ Couldn't fix it", error: "⚠️ Error", cancelled: "Stopped"};
+const KIND = {write: "writing the code and tests", fix: "fixing the code", strengthen: "making the tests stronger"};
+function strengthHTML(st, open) {
+  if (!st || !st.total) return st && st.total === 0 ? '<div class="muted small">🧬 Test strength: nothing to check (no spots to plant bugs in)</div>' : "";
+  const color = st.score >= 70 ? "var(--up)" : st.score >= 40 ? "var(--warn)" : "var(--down)";
+  return `<div style="color:${color}">🧬 Test strength ${st.score}%: the tests caught ${st.caught} of ${st.total} planted bugs</div>` +
+    (st.survived.length ? `<details ${open ? "open" : ""}><summary>Bugs the tests missed</summary><pre>${st.survived.map(b =>
+      `line ${b.line}:  ${esc(b.before)}  →  ${esc(b.after)}`).join("\n")}</pre></details>` : "");
+}
 function attemptHTML(a, live) {
   const lines = [];
   const elapsed = live && a.started ? fmtSecs(job.server_now - a.started) : "";
   if (a.phase === "ai") {
-    lines.push(`<div class="muted"><span class="spinner"></span>${a.n === 1 ? "AI is writing the code and tests" : "AI is fixing the code"}… ${elapsed}</div>`);
+    lines.push(`<div class="muted"><span class="spinner"></span>AI is ${KIND[a.kind] || KIND.write}… ${elapsed}</div>`);
   } else if (a.ai_seconds !== undefined) {
     lines.push(`<div class="muted small">AI answered in ${fmtSecs(a.ai_seconds)}${a.model ? " · " + esc(a.model) : ""}${a.test_count ? " · " + a.test_count + " tests" : ""}</div>`);
   }
-  if (a.phase === "testing") lines.push(`<div class="muted"><span class="spinner"></span>Running the tests in the sandbox…</div>`);
-  if (a.phase === "done" && a.ran !== undefined) {
-    lines.push(a.passed ? `<div style="color:var(--up)">✓ All ${a.ran} tests passed</div>`
+  if (a.phase === "examples") lines.push(`<div class="muted"><span class="spinner"></span>AI is turning your examples into locked tests… ${elapsed}</div>`);
+  else if (a.examples_made) lines.push(`<div class="muted small">📝 Your examples became locked tests (${fmtSecs(a.examples_seconds || 0)})</div>`);
+  if (a.phase === "testing") lines.push(`<div class="muted"><span class="spinner"></span>Running the tests and the demo in the sandbox…</div>`);
+  if (a.ran !== undefined && a.phase !== "testing") {
+    const testsOk = a.failures + a.errors === 0 && a.ran > 0;
+    lines.push(testsOk ? `<div style="color:var(--up)">✓ All ${a.ran} tests passed</div>`
       : `<div style="color:var(--down)">✗ ${a.failures + a.errors || "Some"} of ${a.ran} tests failed${a.ran === 0 ? " (or the code didn't run)" : ""}</div>`);
+    if (a.examples) lines.push(a.examples.load_error ? '<div style="color:var(--down)">✗ 📝 Your example tests couldn\'t run. They\'ll be remade.</div>'
+      : `<div style="color:${a.examples.passed === a.examples.ran && a.examples.ran ? "var(--up)" : "var(--down)"}">${a.examples.passed === a.examples.ran && a.examples.ran ? "✓" : "✗"} 📝 ${a.examples.passed} of ${a.examples.ran} of your examples passed</div>`);
+    if (a.demo) lines.push(a.demo.ok ? '<div style="color:var(--up)">✓ The demo ran without crashing</div>' : '<div style="color:var(--down)">✗ The demo crashed</div>');
   }
+  if (a.phase === "strength") {
+    const p = a.strength_progress;
+    lines.push(`<div class="muted"><span class="spinner"></span>🧬 Planting bugs to check the tests catch them…${p ? ` ${p[0]}/${p[1]}` : ""}</div>`);
+  }
+  if (a.strength) lines.push(strengthHTML(a.strength, false));
   if (a.note) lines.push(`<div class="note">${esc(a.note)}</div>`);
   if (a.tests_changed) lines.push(`<div class="note">The AI changed the tests in this attempt. Check they still test the right thing.</div>`);
   if (a.test_output) lines.push(`<details><summary>Test output</summary><pre>${esc(a.test_output)}</pre></details>`);
+  if (a.demo && a.demo.output) lines.push(`<details><summary>Demo output</summary><pre>${esc(a.demo.output)}</pre></details>`);
   if (a.solution && !a.passed && a.phase === "done") lines.push(`<details><summary>Code from this attempt</summary><pre><code>${highlight(a.solution)}</code></pre></details>`);
   const cls = a.phase !== "done" ? "live" : a.passed ? "pass" : "fail";
-  return `<li class="step ${cls}"><b>Attempt ${a.n}</b>${lines.join("")}</li>`;
+  const label = a.kind === "strengthen" ? " · stronger tests" : a.kind === "fix" ? " · fix" : "";
+  return `<li class="step ${cls}"><b>Attempt ${a.n}<span class="muted small" style="font-weight:400">${label}</span></b>${lines.join("")}</li>`;
 }
 function renderJob() {
   const j = job, live = j.status === "running" || j.status === "queued";
   const openDetails = [...document.querySelectorAll("#jobCard details")].map(d => d.open);
   const best = [...j.attempts].reverse().find(a => a.passed) || [...j.attempts].reverse().find(a => a.solution);
   const files = best ? {"solution.py": best.solution, "test_solution.py": best.tests} : null;
+  if (files && best.example_tests) files["test_examples.py"] = best.example_tests;
+  if (files && !(fileTab in files)) fileTab = "solution.py";
+  const finalStrength = best && [...j.attempts].reverse().find(a => a.passed && a.strength);
   $("#jobCard").innerHTML = `
     <div class="jobHead">
       <div><h2>${j.mode === "fix" ? "🐞 " : "✨ "}${esc(j.title)}</h2><div class="muted small">${esc(j.created)}</div></div>
@@ -316,9 +353,13 @@ function renderJob() {
         <button class="btn ghost small" id="copyBtn">Copy</button>
         <button class="btn ghost small" id="dlBtn">Download</button>
       </div>
+      ${fileTab === "test_examples.py" ? '<div class="note">📝 These locked tests were made from <b>your</b> examples. Check they match what you meant.</div>' : ""}
       <pre><code>${highlight(files[fileTab] || "")}</code></pre>
+      ${j.status === "passed" && finalStrength ? strengthHTML(finalStrength.strength, false) +
+        `<div class="small muted">Test strength shows how well the tests notice changes to the code. It can't tell if the AI misunderstood what you wanted${files["test_examples.py"] ? "; your examples check that" : ". Add 📝 examples to check that"}.</div>` : ""}
+      ${best.demo && best.demo.output ? `<details><summary>What the demo printed</summary><pre>${esc(best.demo.output)}</pre></details>` : ""}
       ${best.explanation ? `<div class="explain">${esc(best.explanation)}</div>` : ""}
-      <p class="small muted">Run it on your computer: save both files in one folder, then run <code>python test_solution.py</code> to see the tests pass.</p>` : ""}`;
+      <p class="small muted">Run it on your computer: save ${files["test_examples.py"] ? "all three files" : "both files"} in one folder, then run <code>python -m unittest</code> to see the tests pass, and <code>python solution.py</code> for the demo.</p>` : ""}`;
   document.querySelectorAll("#jobCard details").forEach((d, i) => { if (openDetails[i]) d.open = true; });
   if ($("#stopBtn")) $("#stopBtn").onclick = async () => { const r = await api(`/api/jobs/${j.id}/cancel`, {}); $("#stopBtn").textContent = "Stopping…"; $("#stopBtn").title = r.note; };
   document.querySelectorAll("[data-file]").forEach(b => b.onclick = () => { fileTab = b.dataset.file; renderJob(); });

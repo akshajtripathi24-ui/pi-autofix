@@ -5,10 +5,12 @@ An AI coding helper that **tests its own code and keeps fixing it until every te
 Describe a program (or paste buggy code), and Pi AutoFix:
 
 1. asks a free AI model to write the code **and** unit tests for it
-2. runs the tests on your Raspberry Pi in a **locked-down sandbox**
-3. if any test fails, sends the exact error back to the AI to fix
-4. repeats until all tests pass (up to a limit you choose)
-5. gives you the tested code to copy or download, with every attempt shown along the way
+2. turns **your own examples** into locked tests the AI must pass and can't change
+3. runs all the tests, plus the program's demo, on your Raspberry Pi in a **locked-down sandbox**
+4. if anything fails, sends the exact error back to the AI to fix
+5. checks the tests are any good by **planting small bugs** in the code to see if the tests catch them, and asks for stronger tests if they don't
+6. repeats until everything passes (up to a limit you choose)
+7. gives you the tested code to copy or download, with every attempt shown along the way
 
 It's **100% free and private**. The AI runs on your own laptop with [Ollama](https://ollama.com), with no accounts and no API keys.
 
@@ -25,8 +27,12 @@ It's **100% free and private**. The AI runs on your own laptop with [Ollama](htt
 
 - **✨ Build something:** describe what you want, and get working, tested Python code.
 - **🐞 Fix my code:** paste buggy code (and what it should do), and get it fixed and tested.
-- **Shows its work:** every attempt, the AI's time, which tests failed and the full error output.
-- **Can't cheat:** if the AI tries to delete failing tests instead of fixing the code, AutoFix keeps the old tests.
+- **📝 Your examples become locked tests:** write a few examples in plain words (e.g. `add "Milk", complete task 0 → Milk shows as done`). The AI must pass them and can't change them, so **you** decide what "correct" means.
+- **🧬 Test strength score:** AutoFix plants small bugs (like `<` → `<=`, `+` → `-`, `if x:` → `if not x:`) one at a time and checks the tests catch them. "Caught 12 of 15 = 80%". Below your goal, it asks the AI for stronger tests.
+- **▶ Runs the demo:** the program's `if __name__ == "__main__":` demo runs too, and must not crash.
+- **Clear rules for the AI:** functions return results instead of printing, bad input raises an error instead of printing a message, numbering is consistent, and each method does exactly what its name says.
+- **Shows its work:** every attempt, the AI's time, which tests failed, the full error output and what the demo printed.
+- **Can't cheat:** if the AI tries to delete failing tests instead of fixing the code, AutoFix keeps the old tests. When making tests stronger, it isn't allowed to change the code.
 - **Safe sandbox:** the AI's code runs as a separate user with **no internet**, **no access to your files**, a **20-second time limit** and a **512 MB memory limit**.
 - **History** of your last 50 jobs, **light/dark mode**, works on phones.
 
@@ -167,13 +173,43 @@ AutoFix now runs all the time and starts when the Pi boots. It uses port **8001*
    - 👍 "A function `is_strong(password)` that returns True if it has at least 8 characters, a number, an uppercase letter and a symbol"
    - 👎 "password thing"
 2. Or click one of the example chips.
-3. Click **▶ Start** and watch the attempts.
+3. Optional, but recommended: add **📝 Your examples** (see below).
+4. Click **▶ Start** and watch the attempts.
 
 ### 🐞 Fix my code
 
 1. Paste your Python code.
 2. Say what it should do. This helps the AI write the right tests.
-3. Click **▶ Start**. It keeps your function names, so the fixed code still fits your project.
+3. Add **📝 Your examples** if you can.
+4. Click **▶ Start**. It keeps your function names, so the fixed code still fits your project.
+
+### 📝 Your examples: the best way to make sure it's right
+
+The AI writes the code **and** its own tests, so it can make the **same mistake in both**. For example, it might think "complete" should delete a task, then write a test checking that it gets deleted. Every test passes, but the code is wrong.
+
+Your examples fix this. Write one per line, in your own words or as code:
+
+```
+add "Milk", then complete task 0 → list shows Milk as done (not deleted)
+add "   " (only spaces) → error
+remove task 5 when there's only 1 task → error
+roman_to_int("XIV") → 14
+```
+
+AutoFix asks the AI to turn them into `test_examples.py`. Those tests are **locked**: the AI must pass them in every attempt and can never change them. Open the **test_examples.py** tab at the end to check they match what you meant.
+
+### 🧬 Test strength
+
+After the tests pass, AutoFix makes up to 15 copies of the code, each with **one small bug planted**: `<` becomes `<=`, `+` becomes `-`, `True` becomes `False`, `if x:` becomes `if not x:`, a number goes up by 1, or a function returns `None`. It runs the tests against each copy:
+
+- tests **fail** → the bug was **caught** 👍
+- tests still **pass** → the tests **missed** it, so they aren't checking that part of the code
+
+The score is the percentage caught. If it's below your goal (default 70%), the bugs the tests missed go back to the AI with "add tests that catch these", without changing the code. It stops if the tests don't get stronger. Click **Bugs the tests missed** to see them.
+
+Professional developers use this technique too; it's called **mutation testing**.
+
+**What it can't do:** test strength measures whether the tests **notice changes** to the code. It can't tell whether the AI **misunderstood what you wanted**. A to-do list where "complete" deletes the task scored 93% in our testing, because its tests matched its own mistake. Only your examples catch that. Also, some planted bugs make no real difference to how the code works (e.g. checking `index <= len(list)` when the next line would fail anyway), so 100% isn't always possible.
 
 ### Reading the results
 
@@ -181,14 +217,18 @@ AutoFix now runs all the time and starts when the Pi boots. It uses port **8001*
 |---|---|
 | **AI is writing the code and tests… 0:34** | Waiting for the laptop's AI. With the 3B model, usually under a minute. |
 | **✗ 2 of 4 tests failed** | Open **Test output** to see exactly what went wrong. That's what gets sent back to the AI. |
-| **✓ All 4 tests passed** | Done. Your code is under **✅ Your tested code**. |
+| **✓ All 4 tests passed** | The AI's tests pass. |
+| **✓ 📝 2 of 2 of your examples passed** | Your locked example tests pass. |
+| **✓ The demo ran without crashing** | The `if __name__ == "__main__":` demo works. Open **Demo output** to see what it printed. |
+| **🧬 Test strength 80%** | The tests caught 80% of the planted bugs. Open **Bugs the tests missed** for the rest. |
+| **Attempt 3 · stronger tests** | The AI is adding tests to catch the bugs that got through. The code isn't allowed to change. |
 | **The AI changed the tests** | Read the tests to make sure they still check the right thing. |
 | **The AI tried to remove tests** | AutoFix refused and kept the old tests. |
 | **❌ Couldn't fix it** | It ran out of attempts. Describe it more clearly, raise **Max attempts**, or switch to the 7B model. |
 
-**Use the code:** click **Download** for both `solution.py` and `test_solution.py`, put them in one folder, and run `python test_solution.py` to see the tests pass yourself.
+**Use the code:** click **Download** for each file (`solution.py`, `test_solution.py`, and `test_examples.py` if you gave examples), put them in one folder, then run `python -m unittest` to see the tests pass and `python solution.py` for the demo.
 
-> **Passing tests ≠ perfect.** Tests only check what they test. Always read the code and the tests before you rely on them.
+> **Passing tests ≠ perfect.** Tests only check what they test. Add examples, look at the test strength, and always read the code and the tests before you rely on them.
 
 ### Settings (⚙️)
 
@@ -196,7 +236,8 @@ AutoFix now runs all the time and starts when the Pi boots. It uses port **8001*
 |---|---|---|
 | Laptop's Ollama address | (empty) | e.g. `192.168.1.150:11434` |
 | AI model | `qwen2.5-coder:3b` | Any model you've pulled on the laptop. `3b` = fast, `7b` = smarter. |
-| Max attempts | 5 | How many times it may try before giving up (1–10) |
+| Max attempts | 5 | How many times it may try before giving up (1–10). Making examples into tests and making tests stronger also use attempts. |
+| Test strength goal | 70% | Below this, AutoFix asks for stronger tests. 0 turns the check off (faster). |
 
 ## Commands
 
@@ -237,18 +278,22 @@ If the badge says **🧪 Sandbox: basic**, run `bash setup-sandbox.sh` and resta
 | "Internet isn't blocked for tests" | Your Pi's system doesn't allow `unshare`. The other protections still work. |
 | "The AI didn't follow the answer format" | Small models sometimes forget the format. AutoFix asks again automatically. If it keeps happening, try the `7b` model. |
 | Tests time out | The code has an infinite loop, or calls `input()`. The AI is told about the timeout and usually fixes it. |
+| "Your example tests couldn't run" | The AI made broken example tests. AutoFix makes them again on the next attempt. Writing examples more clearly (with exact names, e.g. `roman_to_int("XIV") → 14`) helps. |
+| Test strength takes a while | Each planted bug is a separate test run in the sandbox, about 1 second each on a Pi 4. Set the goal to 0 in ⚙️ Settings to skip it. |
+| "The tests didn't get any stronger" | The remaining planted bugs may make no real difference to the code, so no test can catch them. That's normal. |
 | `Unit pi-autofix.service not found` | Run `cd ~/autofix && bash setup-autostart.sh`. |
 | The page shows an old version after updating | Press **Ctrl + F5**. |
 
 ## How it works
 
-- **`server.py`:** a Python web server (standard library only) on port 8001. For each job it builds a prompt, calls Ollama's `/api/chat`, pulls `solution.py` and `test_solution.py` out of the answer, runs `python -m unittest` in the sandbox, and loops with the test output until everything passes. Jobs are saved in `jobs/` and settings in `config.json`; both are in `.gitignore`.
+- **`server.py`:** a Python web server (standard library only) on port 8001. For each job it builds a prompt, calls Ollama's `/api/chat`, pulls `solution.py` and `test_solution.py` out of the answer, turns your examples into `test_examples.py` (once), runs `python -m unittest` and the demo in the sandbox, and loops with the output until everything passes. Then it uses Python's `ast` module to plant one bug at a time (mutation testing) and scores the tests. Jobs are saved in `jobs/` and settings in `config.json`; both are in `.gitignore`.
 - **`index.html`:** the whole website in one file. It uses [highlight.js](https://highlightjs.org/) for code colours.
 - **`setup-sandbox.sh`** creates the sandbox user; **`setup-autostart.sh`** creates the `pi-autofix` systemd service.
 
 ## Roadmap
 
 - [x] **Stage 1:** Python, build and fix modes, test-and-fix loop, sandbox
+- [x] **Stage 1.5:** your examples as locked tests, test strength (mutation testing), demo check, clearer rules for the AI
 - [ ] **Stage 2:** more languages: JavaScript, C, C++, Java, Bash
 - [ ] **Stage 3:** hardware mode: ESP32/Arduino code that compiles, wiring table, parts list, wiring safety checks
 - [ ] **Stage 4:** 3D-printable cases designed in OpenSCAD, rendered and checked, with a preview
